@@ -1,10 +1,9 @@
-# RA Decentralized IDentification (DID) Service
+# RA Decentralized IDentification (DID) Service - Java
 Implementing [Web Of Trust](https://en.wikipedia.org/wiki/Web_of_trust) with Self Sovereign Identity.
 
-[W3C DID Specification](https://w3c-ccg.github.io/did-spec/) used as a guideline to ensure interoperability with other DID
-implementations. Once implemented IAW the [spec](https://w3c.github.io/did-core/),
-[registration](https://w3c-ccg.github.io/did-method-registry/#the-registration-process) can be accomplished.
-[Verification](https://github.com/w3c-ccg/did-test-suite/) implementation is IAW the spec is the final work required.
+[W3C DID](https://w3c.github.io/did-core/) interoperability is kept as a guideline. RA will
+**not** register its own DID method — see [`../DESIGN.md`](../DESIGN.md) §5, which produces a
+`did:nostr` view of the key instead.
 
 Uses Key Ring Service to Manage the Physical Persistence, Generation, Encryption, Decryption, Revocation, and Destruction of Keys
 
@@ -15,30 +14,33 @@ The current Java implementation runs as the identity and key-management layer fo
 an infrastructure-independent communications system. That is where the design gets its requirements
 and its testing.
 
-## Design Direction — moving off OpenPGP
+## Direction — off OpenPGP
 
-The working implementation is built on **OpenPGP key rings**: RSA / ElGamal keys, GnuPG-style
-keyring files persisted locally, and PGP key signatures for the web of trust. It works, but the
-OpenPGP ecosystem carries a lot of weight — large keys, awkward key distribution, and a trust model
-that few people ever really operated. In practice that weight is most of what makes self-sovereign
-identity feel impractical to build on.
+The working implementation is built on **OpenPGP key rings**: RSA keys, GnuPG-style keyring
+files persisted locally, and PGP key signatures for the web of trust. It works, but the
+OpenPGP ecosystem carries a lot of weight — large keys, awkward key distribution, and a trust
+model that few people ever really operated. In practice that weight is most of what makes
+self-sovereign identity feel impractical to build on.
 
-The direction being explored keeps the same guarantees (a self-owned identifier, a web of trust
-from signed attributes, selective disclosure, W3C DID interoperability) but moves them onto the
-lighter primitives that Nostr and similar decentralized protocols have converged on:
+The replacement is specified one level up, for the whole DID effort rather than this
+implementation alone:
 
-- **Modern elliptic-curve keys** — small `secp256k1` keypairs and Schnorr (BIP-340) signatures in
-  place of OpenPGP key ring collections; a single keypair as the identity root rather than a
-  master key plus subkeys.
-- **Relay-based distribution** — publishing and resolving identity documents and attestations over
-  Nostr-style relays instead of PGP keyservers or local keyring files.
-- **Signed attestations for the web of trust** — vouching reframed as portable, independently
-  verifiable signed events rather than PGP key signatures.
-- **W3C DID alignment kept** — still targeting interoperability, with a DID method suited to
-  event-based identity documents.
+- **[`../STRATEGY.md`](../STRATEGY.md)** — why identity adoption keeps failing and the plan
+  for doing better: ride Nostr rather than bootstrap a network, own the gap it still has (key
+  recovery and attestation), and ship a specification and a small library before a product.
+- **[`../DESIGN.md`](../DESIGN.md)** — the technical specification: `secp256k1` / BIP-340
+  Schnorr identities, Nostr-compatible signed records, attestations as a decentralized
+  replacement for NIP-05, guardian-based recovery and rotation, and a `did:nostr`
+  compatibility view.
 
-None of this is settled. It is the current thinking, not a committed design or a migration plan —
-treat the sections below as describing the OpenPGP-based implementation that exists today.
+Two reversals from what this README previously said: there will be **no RA-specific DID
+method** (a `did:nostr` community draft already exists — contribute to that instead), and
+**relays are an opt-in distribution option, not the architecture** — signed records are
+transport-agnostic.
+
+Everything below describes the OpenPGP implementation that exists today. `../DESIGN.md` §7.3
+lists what changes in this module: a `NostrKeyRing` alongside `OpenPGPKeyRing`, a successor to
+the PGP-typed `KeyRing` interface, a real `vouch`, and several defect fixes.
 
 ## Abstract (from W3C)
 Decentralized identifiers (DIDs) are a new type of identifier to provide verifiable, decentralized digital identity.
@@ -176,9 +178,12 @@ SHA-1 is used throughout while still in testing mode. Will move to SHA-256
 prior to production release.
 
 ### TBD
-- Moving key handling off OpenPGP key rings toward `secp256k1` / Schnorr keys, relay-based
-  distribution, and signed attestations (see **Design Direction** above).
-- Adding Reputation support for signers signing attributes of signees.
+- Moving key handling off OpenPGP key rings onto `secp256k1` / BIP-340 Schnorr keys and signed
+  attestations — specified in [`../DESIGN.md`](../DESIGN.md); §7.3 lists the changes landing
+  in this module.
+- Adding Reputation support for signers signing attributes of signees. Note `../DESIGN.md`
+  §3.5 treats trust scoring as a client concern, so this may become an attestation query
+  rather than a `Reputation` class.
 
 ### 1.2
 - Converging with KeyRingService.
