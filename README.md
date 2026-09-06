@@ -8,6 +8,38 @@ implementations. Once implemented IAW the [spec](https://w3c.github.io/did-core/
 
 Uses Key Ring Service to Manage the Physical Persistence, Generation, Encryption, Decryption, Revocation, and Destruction of Keys
 
+## Status
+
+The current Java implementation runs as the identity and key-management layer for
+[1M5](https://1m5.io) — node and account identities, key management, signing, and verification for
+an infrastructure-independent communications system. That is where the design gets its requirements
+and its testing.
+
+## Design Direction — moving off OpenPGP
+
+The working implementation is built on **OpenPGP key rings**: RSA / ElGamal keys, GnuPG-style
+keyring files persisted locally, and PGP key signatures for the web of trust. It works, but the
+OpenPGP ecosystem carries a lot of weight — large keys, awkward key distribution, and a trust model
+that few people ever really operated. In practice that weight is most of what makes self-sovereign
+identity feel impractical to build on.
+
+The direction being explored keeps the same guarantees (a self-owned identifier, a web of trust
+from signed attributes, selective disclosure, W3C DID interoperability) but moves them onto the
+lighter primitives that Nostr and similar decentralized protocols have converged on:
+
+- **Modern elliptic-curve keys** — small `secp256k1` keypairs and Schnorr (BIP-340) signatures in
+  place of OpenPGP key ring collections; a single keypair as the identity root rather than a
+  master key plus subkeys.
+- **Relay-based distribution** — publishing and resolving identity documents and attestations over
+  Nostr-style relays instead of PGP keyservers or local keyring files.
+- **Signed attestations for the web of trust** — vouching reframed as portable, independently
+  verifiable signed events rather than PGP key signatures.
+- **W3C DID alignment kept** — still targeting interoperability, with a DID method suited to
+  event-based identity documents.
+
+None of this is settled. It is the current thinking, not a committed design or a migration plan —
+treat the sections below as describing the OpenPGP-based implementation that exists today.
+
 ## Abstract (from W3C)
 Decentralized identifiers (DIDs) are a new type of identifier to provide verifiable, decentralized digital identity.
 These new identifiers are designed to enable the controller of a DID to prove control over it and to be implemented
@@ -49,7 +81,7 @@ This refers to how the platforms and protocols are governed, including how they 
 They should be open-source, well-known, and as independent as possible of any particular architecture;
 anyone should be able to examine how they work.
 
-* All code in the 1M5 project is GPLv3 open source.
+* All code in this project is open source, released under the MIT license.
 
 ### Users must have the right to participate in the governance of their identity infrastructure
 The platform, protocols on which self-sovereign identities are built, must be governed by identity holders.
@@ -144,6 +176,8 @@ SHA-1 is used throughout while still in testing mode. Will move to SHA-256
 prior to production release.
 
 ### TBD
+- Moving key handling off OpenPGP key rings toward `secp256k1` / Schnorr keys, relay-based
+  distribution, and signed attestations (see **Design Direction** above).
 - Adding Reputation support for signers signing attributes of signees.
 
 ### 1.2
@@ -157,3 +191,7 @@ prior to production release.
 - OpenPGP Key Rings Collections Generation, Key Rings Creation/Deletion, Encryption, Decryption, Signing, Verify Signatures.
 - Keys persisted locally.
 
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
