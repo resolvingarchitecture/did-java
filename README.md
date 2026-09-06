@@ -83,7 +83,7 @@ This refers to how the platforms and protocols are governed, including how they 
 They should be open-source, well-known, and as independent as possible of any particular architecture;
 anyone should be able to examine how they work.
 
-* All code in this project is open source, released under the MIT license.
+* All code in this project is open source, dedicated to the public domain (CC0 1.0).
 
 ### Users must have the right to participate in the governance of their identity infrastructure
 The platform, protocols on which self-sovereign identities are built, must be governed by identity holders.
@@ -199,4 +199,6 @@ prior to production release.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+**Public domain**, via [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/)
+— see [`LICENSE`](LICENSE). (Formerly GPLv3, then MIT; now public domain along with the rest
+of the DID work.)
