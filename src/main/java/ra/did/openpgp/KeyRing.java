@@ -1,4 +1,4 @@
-package ra.did;
+package ra.did.openpgp;
 
 import org.bouncycastle.openpgp.PGPException;
 import org.bouncycastle.openpgp.PGPPublicKey;
@@ -9,7 +9,7 @@ import java.util.Properties;
 
 /**
  * Interface for implementing all KeyRings.
- * Ensure they are thread safe as they are cached in {@link DIDService} on startup and shared across all incoming threads.
+ * Ensure they are thread safe as they are cached in {@link ra.did.DIDService} on startup and shared across all incoming threads.
  */
 public interface KeyRing {
 

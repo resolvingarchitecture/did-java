@@ -1,4 +1,4 @@
-package ra.did;
+package ra.did.openpgp;
 
 import org.bouncycastle.openpgp.PGPException;
 import org.bouncycastle.openpgp.PGPPublicKey;

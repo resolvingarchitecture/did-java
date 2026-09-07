@@ -1,4 +1,4 @@
-package ra.did;
+package ra.did.openpgp;
 
 import org.bouncycastle.bcpg.*;
 import org.bouncycastle.bcpg.sig.Features;

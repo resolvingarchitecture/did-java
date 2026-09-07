@@ -1,4 +1,6 @@
-package ra.did;
+package ra.did.openpgp;
+
+import ra.did.DIDRequest;
 
 import org.bouncycastle.openpgp.PGPPublicKey;
 

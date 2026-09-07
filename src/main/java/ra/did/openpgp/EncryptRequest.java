@@ -1,4 +1,6 @@
-package ra.did;
+package ra.did.openpgp;
+
+import ra.did.DIDRequest;
 
 import ra.common.content.Content;
 import ra.common.identity.DID;

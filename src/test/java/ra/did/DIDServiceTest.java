@@ -1,6 +1,7 @@
 package ra.did;
 
 import org.junit.jupiter.api.*;
+import ra.did.openpgp.*;
 import ra.common.Envelope;
 import ra.common.content.Text;
 import ra.common.identity.DID;
@@ -252,6 +253,14 @@ public class DIDServiceTest {
     @Test
     @Order(8)
     public void createIdentity() {
+        // The service persists identities under ~/.ra; clear any Bob from a prior run
+        // (the .json record and the OpenPGP key rings) so this test is idempotent.
+        File identityDir = new File(service.getServiceDirectory(), DID.DIDType.IDENTITY.name());
+        for (String f : new String[]{"Bob.json", "Bob.pkr", "Bob.skr"}) {
+            File file = new File(identityDir, f);
+            if (file.exists()) assertTrue(file.delete());
+        }
+
         DID did = new DID();
         did.setUsername("Bob");
         did.setPassphrase("1234");

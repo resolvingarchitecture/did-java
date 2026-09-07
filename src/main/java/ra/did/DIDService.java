@@ -1,6 +1,7 @@
 package ra.did;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import ra.did.openpgp.*;
 import ra.common.*;
 import ra.common.content.JSON;
 import ra.common.crypto.EncryptionAlgorithm;
