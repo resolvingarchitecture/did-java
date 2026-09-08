@@ -96,6 +96,55 @@ public final class NostrEvent {
         return sb.toString();
     }
 
+    private static void appendTagsJson(StringBuilder sb, List<List<String>> tags) {
+        sb.append('[');
+        for (int i = 0; i < tags.size(); i++) {
+            if (i > 0) sb.append(',');
+            List<String> tag = tags.get(i);
+            sb.append('[');
+            for (int j = 0; j < tag.size(); j++) {
+                if (j > 0) sb.append(',');
+                escapeString(sb, tag.get(j));
+            }
+            sb.append(']');
+        }
+        sb.append(']');
+    }
+
+    /** The full signed event as compact JSON (Nostr wire form). Not the canonical preimage. */
+    public String toJson() {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("{\"id\":");
+        escapeString(sb, id == null ? "" : id);
+        sb.append(",\"pubkey\":");
+        escapeString(sb, pubkey == null ? "" : pubkey);
+        sb.append(",\"created_at\":").append(createdAt);
+        sb.append(",\"kind\":").append(kind);
+        sb.append(",\"tags\":");
+        appendTagsJson(sb, tags);
+        sb.append(",\"content\":");
+        escapeString(sb, content);
+        sb.append(",\"sig\":");
+        escapeString(sb, sig == null ? "" : sig);
+        sb.append('}');
+        return sb.toString();
+    }
+
+    /** id / pubkey / created_at / kind / tags / content / sig as a plain map. */
+    public Map<String, Object> toMap() {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("id", id);
+        m.put("pubkey", pubkey);
+        m.put("created_at", createdAt);
+        m.put("kind", kind);
+        List<List<String>> tagsCopy = new ArrayList<>();
+        for (List<String> t : tags) tagsCopy.add(new ArrayList<>(t));
+        m.put("tags", tagsCopy);
+        m.put("content", content);
+        m.put("sig", sig);
+        return m;
+    }
+
     static void escapeString(StringBuilder sb, String s) {
         sb.append('"');
         int n = s.length();

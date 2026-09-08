@@ -2,6 +2,7 @@ package ra.did;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import ra.did.openpgp.*;
+import ra.did.nostr.*;
 import ra.common.*;
 import ra.common.content.JSON;
 import ra.common.crypto.EncryptionAlgorithm;
@@ -51,6 +52,14 @@ public class DIDService extends BaseService {
     public static final String OPERATION_VOUCH = "VOUCH";
     public static final String OPERATION_RELOAD = "RELOAD";
 
+    // Nostr / BIP-340 identity operations (ra.did.nostr; DESIGN.md §7.3)
+    public static final String OPERATION_GENERATE_NOSTR_IDENTITY = "GENERATE_NOSTR_IDENTITY";
+    public static final String OPERATION_ATTEST = "ATTEST"; // alias of VOUCH
+    public static final String OPERATION_DESIGNATE_GUARDIANS = "DESIGNATE_GUARDIANS";
+    public static final String OPERATION_CLAIM_ROTATION = "CLAIM_ROTATION";
+    public static final String OPERATION_ATTEST_ROTATION = "ATTEST_ROTATION";
+    public static final String OPERATION_VERIFY_ROTATION = "VERIFY_ROTATION";
+
     public static final String OPERATION_GET_IDENTITIES = "GET_IDENTITIES";
     public static final String OPERATION_GET_IDENTITY = "GET_IDENTITY";
     public static final String OPERATION_VERIFY_IDENTITY = "VERIFY";
@@ -78,6 +87,12 @@ public class DIDService extends BaseService {
     private Properties properties = new Properties();
 
     private Map<String, KeyRing> keyRings = new HashMap<>();
+
+    // Nostr / BIP-340 identity layer (DESIGN.md §7.3). Identities are held in
+    // memory keyed by x-only pubkey hex; there is no encrypted store yet (§6.3),
+    // so they do not survive a restart — the caller re-imports secrets it saved.
+    private NostrKeyRing nostrKeyRing;
+    private final Map<String, NostrIdentity> nostrIdentities = new java.util.concurrent.ConcurrentHashMap<>();
 
     // Identity DBs
     private InfoVaultFileDB identitiesDB; // Personal
@@ -120,7 +135,12 @@ public class DIDService extends BaseService {
             case OPERATION_VERIFY_SIGNATURE: {verifySignature(e);break;}
             case OPERATION_ENCRYPT_SYMMETRIC: {encryptSymmetric(e);break;}
             case OPERATION_DECRYPT_SYMMETRIC: {decryptSymmetric(e);break;}
-            case OPERATION_VOUCH: {vouch(e);break;}
+            case OPERATION_VOUCH: case OPERATION_ATTEST: {attest(e);break;}
+            case OPERATION_GENERATE_NOSTR_IDENTITY: {generateNostrIdentity(e);break;}
+            case OPERATION_DESIGNATE_GUARDIANS: {designateGuardians(e);break;}
+            case OPERATION_CLAIM_ROTATION: {claimRotation(e);break;}
+            case OPERATION_ATTEST_ROTATION: {attestRotation(e);break;}
+            case OPERATION_VERIFY_ROTATION: {verifyRotation(e);break;}
             case OPERATION_RELOAD: {loadKeyRingImplementations();break;}
             case OPERATION_GET_IDENTITIES: {getIdentities(e);break;}
             case OPERATION_GET_IDENTITY: {getIdentity(e);break;}
@@ -532,22 +552,143 @@ public class DIDService extends BaseService {
         }
     }
 
-    private void vouch(Envelope e) {
-        VouchRequest r = (VouchRequest)e.getData(VouchRequest.class);
-        if(r.signer==null) {
-            r.statusCode = VouchRequest.SIGNER_REQUIRED;
-            return;
+    // --- Nostr / BIP-340 identity operations (DESIGN.md §3–§4, §7.3) ---
+
+    private static long ts(long requested) {
+        return requested > 0 ? requested : System.currentTimeMillis() / 1000L;
+    }
+
+    private NostrIdentity heldSigner(NostrRequest r, String pubkeyHexOrNpub) {
+        if (pubkeyHexOrNpub == null || pubkeyHexOrNpub.isEmpty()) {
+            r.statusCode = NostrRequest.SIGNER_REQUIRED;
+            return null;
         }
-        if(r.signee==null){
-            r.statusCode = VouchRequest.SIGNEE_REQUIRED;
-            return;
+        NostrIdentity id = nostrIdentities.get(NostrKeys.normalizePubkey(pubkeyHexOrNpub));
+        if (id == null || !id.hasSecret()) {
+            r.statusCode = NostrRequest.SIGNER_NOT_FOUND;
         }
-        if(r.attributesToSign==null) {
-            r.statusCode = VouchRequest.ATTRIBUTES_REQUIRED;
-            return;
+        return (id != null && id.hasSecret()) ? id : null;
+    }
+
+    private void generateNostrIdentity(Envelope e) {
+        GenerateNostrIdentityRequest r = (GenerateNostrIdentityRequest) e.getData(GenerateNostrIdentityRequest.class);
+        if (r == null) { r = new GenerateNostrIdentityRequest(); r.statusCode = GenerateNostrIdentityRequest.REQUEST_REQUIRED; e.addData(GenerateNostrIdentityRequest.class, r); return; }
+        try {
+            NostrIdentity id = (r.importSecretKeyHex != null && !r.importSecretKeyHex.isEmpty())
+                    ? NostrIdentity.fromSecretHex(r.importSecretKeyHex)
+                    : nostrKeyRing.generateIdentity();
+            nostrIdentities.put(id.getPublicKeyHex(), id);
+            r.publicKeyHex = id.getPublicKeyHex();
+            r.npub = id.npub();
+            r.did = id.didNostr();
+            r.secretKeyHex = id.secretHex(); // returned once; caller persists (no encrypted store yet)
+            r.publicKey = id.toPublicKey();
+            r.successful = true;
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT;
+            r.exception = ex;
         }
-        // TODO: Verify attributes to sign are available attributes
-        LOG.warning("VOUCH not yet implemented.");
+    }
+
+    private void attest(Envelope e) {
+        AttestRequest r = (AttestRequest) e.getData(AttestRequest.class);
+        if (r == null) { r = new AttestRequest(); r.statusCode = AttestRequest.REQUEST_REQUIRED; e.addData(AttestRequest.class, r); return; }
+        NostrIdentity signer = heldSigner(r, r.signerPubkey);
+        if (signer == null) return;
+        if (r.subjectPubkey == null || r.subjectPubkey.isEmpty()) { r.statusCode = NostrRequest.SUBJECT_REQUIRED; return; }
+        if (r.claims == null || r.claims.isEmpty()) { r.statusCode = NostrRequest.INVALID_INPUT; r.errorMessage = "at least one claim is required"; return; }
+        try {
+            List<NostrAttestations.Claim> claims = new ArrayList<>();
+            for (Map.Entry<String, String> c : r.claims.entrySet()) claims.add(new NostrAttestations.Claim(c.getKey(), c.getValue()));
+            NostrEvent ev = NostrAttestations.attestation(
+                    r.subjectPubkey, claims, r.method == null || r.method.isEmpty() ? "asserted" : r.method,
+                    r.expiration, ts(r.createdAt));
+            nostrKeyRing.sign(ev, signer);
+            r.setResultEvent(ev);
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT;
+            r.exception = ex;
+        }
+    }
+
+    private void designateGuardians(Envelope e) {
+        DesignateGuardiansRequest r = (DesignateGuardiansRequest) e.getData(DesignateGuardiansRequest.class);
+        if (r == null) { r = new DesignateGuardiansRequest(); r.statusCode = DesignateGuardiansRequest.REQUEST_REQUIRED; e.addData(DesignateGuardiansRequest.class, r); return; }
+        NostrIdentity root = heldSigner(r, r.rootPubkey);
+        if (root == null) return;
+        try {
+            NostrEvent ev = NostrRotation.guardianSet(r.guardians, r.threshold, ts(r.createdAt));
+            nostrKeyRing.sign(ev, root);
+            r.setResultEvent(ev);
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT;
+            r.exception = ex;
+        }
+    }
+
+    private void claimRotation(Envelope e) {
+        ClaimRotationRequest r = (ClaimRotationRequest) e.getData(ClaimRotationRequest.class);
+        if (r == null) { r = new ClaimRotationRequest(); r.statusCode = ClaimRotationRequest.REQUEST_REQUIRED; e.addData(ClaimRotationRequest.class, r); return; }
+        NostrIdentity newId = heldSigner(r, r.newPubkey);
+        if (newId == null) return;
+        try {
+            String prevSig = null;
+            if (r.oldPubkeyForPrevSig != null && !r.oldPubkeyForPrevSig.isEmpty()) {
+                NostrIdentity oldId = nostrIdentities.get(NostrKeys.normalizePubkey(r.oldPubkeyForPrevSig));
+                if (oldId == null || !oldId.hasSecret()) { r.statusCode = NostrRequest.SIGNER_NOT_FOUND; r.errorMessage = "old identity not held; cannot attach prev-sig"; return; }
+                prevSig = NostrRotation.prevSig(newId.getPublicKeyHex(), oldId.secretHex());
+            }
+            NostrEvent ev = NostrRotation.rotationClaim(r.oldPubkey, r.reason, prevSig, ts(r.createdAt));
+            nostrKeyRing.sign(ev, newId);
+            r.setResultEvent(ev);
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT;
+            r.exception = ex;
+        }
+    }
+
+    private void attestRotation(Envelope e) {
+        AttestRotationRequest r = (AttestRotationRequest) e.getData(AttestRotationRequest.class);
+        if (r == null) { r = new AttestRotationRequest(); r.statusCode = AttestRotationRequest.REQUEST_REQUIRED; e.addData(AttestRotationRequest.class, r); return; }
+        NostrIdentity guardian = heldSigner(r, r.guardianPubkey);
+        if (guardian == null) return;
+        try {
+            NostrEvent ev = NostrRotation.rotationAttestation(
+                    r.oldPubkey, r.newPubkey, r.method == null || r.method.isEmpty() ? "asserted" : r.method, ts(r.createdAt));
+            nostrKeyRing.sign(ev, guardian);
+            r.setResultEvent(ev);
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT;
+            r.exception = ex;
+        }
+    }
+
+    private void verifyRotation(Envelope e) {
+        VerifyRotationRequest r = (VerifyRotationRequest) e.getData(VerifyRotationRequest.class);
+        if (r == null) { r = new VerifyRotationRequest(); r.statusCode = VerifyRotationRequest.REQUEST_REQUIRED; e.addData(VerifyRotationRequest.class, r); return; }
+        if (r.events == null || r.events.isEmpty()) { r.statusCode = NostrRequest.INVALID_INPUT; r.errorMessage = "no events"; return; }
+        try {
+            for (NostrEvent ev : r.events) {
+                NostrEvent.VerifyResult vr = ev.verify();
+                if (!vr.ok) {
+                    r.statusCode = NostrRequest.INVALID_INPUT;
+                    r.errorMessage = "event " + ev.getId() + " failed verification step " + vr.step + ": " + vr.reason;
+                    return;
+                }
+            }
+            NostrRotation.Options opts = new NostrRotation.Options();
+            if (r.cooldownSeconds > 0) opts.cooldownSeconds = r.cooldownSeconds;
+            if (r.now > 0) opts.now = r.now;
+            NostrRotation.Verdict v = NostrRotation.evaluate(r.events, opts);
+            r.accepted = v.accepted;
+            r.reason = v.reason;
+            r.newKey = v.newKey;
+            r.oldKey = v.oldKey;
+            r.successful = true;
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT;
+            r.exception = ex;
+        }
     }
 
     private void getIdentities(Envelope e) {
@@ -920,6 +1061,10 @@ public class DIDService extends BaseService {
             Security.addProvider(new BouncyCastleProvider());
         }
         loadKeyRingImplementations();
+        nostrKeyRing = new NostrKeyRing();
+        if(!nostrKeyRing.init(properties)) {
+            LOG.warning("NostrKeyRing (BIP-340) backend failed to load; Nostr identity operations will be unavailable.");
+        }
         // TODO: Support external drives (InfoVault)
         nodesDB = new InfoVaultFileDB();
         nodesDB.setBaseURL(new File(getServiceDirectory(),DID.DIDType.NODE.name()).getAbsolutePath());
