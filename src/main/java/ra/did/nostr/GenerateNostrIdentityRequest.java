@@ -16,6 +16,13 @@ public class GenerateNostrIdentityRequest extends NostrRequest {
     /** Optional: import this 32-byte secret (hex) instead of generating one. Not serialised. */
     public String importSecretKeyHex;
 
+    /**
+     * Optional: passphrase to seal the secret at rest (§6.3). If set, the identity
+     * is persisted encrypted; if not, it is held in memory only and lost on
+     * restart. Not serialised.
+     */
+    public String passphrase;
+
     // Response
     public String publicKeyHex;
     public String npub;
@@ -23,4 +30,6 @@ public class GenerateNostrIdentityRequest extends NostrRequest {
     /** Returned once for the caller to persist. Not serialised. */
     public String secretKeyHex;
     public PublicKey publicKey;
+    /** True if the secret was sealed to disk. */
+    public boolean persisted;
 }

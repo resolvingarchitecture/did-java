@@ -1,5 +1,8 @@
 package ra.did.nostr;
 
+import java.security.GeneralSecurityException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 import java.util.logging.Logger;
 
@@ -12,10 +15,10 @@ import java.util.logging.Logger;
  * {@code DIDService} caches key-ring implementations by class name, so this can
  * run alongside the OpenPGP one during migration (§6.4).
  *
- * <p>Scope of this first cut: keygen, event signing and verification, and the
- * NIP-19 / {@code did:nostr} encodings. Persistence and encryption at rest (§6.3),
- * the attestation / guardian / rotation builders (§3–§4), and the new
- * {@code DIDService} bus operations (§7.3) are separate, still-open items.
+ * <p>Covers keygen, signing and verification, the NIP-19 / {@code did:nostr}
+ * encodings, and — once {@link #setStore} is called — encrypted-at-rest
+ * persistence (§6.3) via {@link NostrIdentityStore}. Still open: the remaining
+ * query/export bus operations and Android Keystore wrapping.
  */
 public class NostrKeyRing implements IdentityKeyRing {
 
@@ -29,6 +32,7 @@ public class NostrKeyRing implements IdentityKeyRing {
     public static final String PROP_DETERMINISTIC_SIGNATURES = "ra.did.nostr.deterministicSignatures";
 
     private volatile boolean deterministicSignatures = false;
+    private volatile NostrIdentityStore store;
 
     @Override
     public boolean init(Properties properties) {
@@ -80,5 +84,63 @@ public class NostrKeyRing implements IdentityKeyRing {
     @Override
     public String didNostr(NostrIdentity identity) {
         return identity.didNostr();
+    }
+
+    // --- encrypted-at-rest persistence (§6.3) ------------------
+
+    /** Attach the on-disk store. Until this is set, persistence is unavailable. */
+    public void setStore(NostrIdentityStore store) {
+        this.store = store;
+    }
+
+    public boolean hasStore() {
+        return store != null;
+    }
+
+    /**
+     * Seal {@code identity}'s secret under {@code passphrase} and persist it. The
+     * caller-supplied passphrase string cannot be zeroed here (it lives in the
+     * String pool); pass a value you are willing to have linger for the JVM's
+     * lifetime, or a per-call throwaway.
+     */
+    public void persist(NostrIdentity identity, String passphrase) {
+        requireStore();
+        char[] p = passphrase == null ? null : passphrase.toCharArray();
+        try {
+            store.save(identity, p);
+        } finally {
+            if (p != null) Arrays.fill(p, '\0');
+        }
+    }
+
+    /** Load and decrypt a persisted identity, or {@code null} if none is stored. */
+    public NostrIdentity loadIdentity(String pubkeyHex, String passphrase) throws GeneralSecurityException {
+        requireStore();
+        char[] p = passphrase == null ? null : passphrase.toCharArray();
+        try {
+            return store.load(pubkeyHex, p);
+        } finally {
+            if (p != null) Arrays.fill(p, '\0');
+        }
+    }
+
+    public boolean isPersisted(String pubkeyHex) {
+        return store != null && store.exists(pubkeyHex);
+    }
+
+    public boolean deletePersisted(String pubkeyHex) {
+        requireStore();
+        return store.delete(pubkeyHex);
+    }
+
+    public List<String> persistedIdentities() {
+        requireStore();
+        return store.list();
+    }
+
+    private void requireStore() {
+        if (store == null) {
+            throw new IllegalStateException("no NostrIdentityStore configured (call setStore)");
+        }
     }
 }

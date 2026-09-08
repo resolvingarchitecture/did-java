@@ -4,6 +4,7 @@ import org.junit.jupiter.api.*;
 import ra.common.Envelope;
 import ra.did.nostr.*;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -25,6 +26,10 @@ public class DIDServiceNostrTest {
     public static void init() {
         service = new DIDService(new MockProducer(), null);
         assertTrue(service.start(new Properties()));
+        // clean the encrypted identity store so persistence tests are idempotent
+        File nostrDir = new File(service.getServiceDirectory(), "NOSTR");
+        File[] files = nostrDir.listFiles();
+        if (files != null) for (File f : files) f.delete();
     }
 
     @AfterAll
@@ -183,5 +188,86 @@ public class DIDServiceNostrTest {
         b = call(DIDService.OPERATION_GENERATE_NOSTR_IDENTITY, GenerateNostrIdentityRequest.class, b);
         assertTrue(b.successful);
         assertEquals(a.publicKeyHex, b.publicKeyHex);
+    }
+
+    @Test
+    @Order(7)
+    public void generateWithPassphrasePersistsAndReloadsInAFreshService() {
+        GenerateNostrIdentityRequest g = new GenerateNostrIdentityRequest();
+        g.passphrase = "unlock me";
+        g = call(DIDService.OPERATION_GENERATE_NOSTR_IDENTITY, GenerateNostrIdentityRequest.class, g);
+        assertTrue(g.successful);
+        assertTrue(g.persisted, "should have been sealed to disk");
+        String pub = g.publicKeyHex;
+        assertNull(g.passphrase, "passphrase must be cleared from the request");
+
+        // a brand-new service instance over the same directory
+        DIDService fresh = new DIDService(new MockProducer(), null);
+        assertTrue(fresh.start(new Properties()));
+
+        LoadNostrIdentityRequest bad = new LoadNostrIdentityRequest();
+        bad.pubkey = pub;
+        bad.passphrase = "wrong";
+        Envelope e1 = Envelope.documentFactory();
+        e1.addData(LoadNostrIdentityRequest.class, bad);
+        e1.addRoute(DIDService.class.getName(), DIDService.OPERATION_LOAD_NOSTR_IDENTITY);
+        e1.setRoute(e1.getDynamicRoutingSlip().nextRoute());
+        fresh.handleDocument(e1);
+        bad = (LoadNostrIdentityRequest) e1.getData(LoadNostrIdentityRequest.class);
+        assertFalse(bad.successful);
+        assertEquals(LoadNostrIdentityRequest.BAD_PASSPHRASE, bad.statusCode);
+
+        LoadNostrIdentityRequest ok = new LoadNostrIdentityRequest();
+        ok.pubkey = pub;
+        ok.passphrase = "unlock me";
+        Envelope e2 = Envelope.documentFactory();
+        e2.addData(LoadNostrIdentityRequest.class, ok);
+        e2.addRoute(DIDService.class.getName(), DIDService.OPERATION_LOAD_NOSTR_IDENTITY);
+        e2.setRoute(e2.getDynamicRoutingSlip().nextRoute());
+        fresh.handleDocument(e2);
+        ok = (LoadNostrIdentityRequest) e2.getData(LoadNostrIdentityRequest.class);
+        assertTrue(ok.successful, "load failed: " + ok.statusCode);
+        assertEquals(pub, ok.publicKeyHex);
+
+        // the loaded identity can now sign on the fresh service
+        AttestRequest at = new AttestRequest();
+        at.signerPubkey = pub;
+        at.subjectPubkey = pub;
+        at.claims.put("name", "self");
+        Envelope e3 = Envelope.documentFactory();
+        e3.addData(AttestRequest.class, at);
+        e3.addRoute(DIDService.class.getName(), DIDService.OPERATION_ATTEST);
+        e3.setRoute(e3.getDynamicRoutingSlip().nextRoute());
+        fresh.handleDocument(e3);
+        at = (AttestRequest) e3.getData(AttestRequest.class);
+        assertTrue(at.successful, "attest on reloaded identity failed: " + at.statusCode);
+        assertTrue(at.event.verify().ok);
+
+        fresh.gracefulShutdown();
+    }
+
+    @Test
+    @Order(8)
+    public void deleteRemovesFromMemoryAndDisk() {
+        GenerateNostrIdentityRequest g = new GenerateNostrIdentityRequest();
+        g.passphrase = "pw";
+        g = call(DIDService.OPERATION_GENERATE_NOSTR_IDENTITY, GenerateNostrIdentityRequest.class, g);
+        String pub = g.publicKeyHex;
+
+        DeleteNostrIdentityRequest d = new DeleteNostrIdentityRequest();
+        d.pubkey = pub;
+        d = call(DIDService.OPERATION_DELETE_NOSTR_IDENTITY, DeleteNostrIdentityRequest.class, d);
+        assertTrue(d.successful);
+        assertTrue(d.removedFromMemory);
+        assertTrue(d.deletedFromDisk);
+
+        // signing with it now fails
+        AttestRequest at = new AttestRequest();
+        at.signerPubkey = pub;
+        at.subjectPubkey = pub;
+        at.claims.put("name", "x");
+        at = call(DIDService.OPERATION_ATTEST, AttestRequest.class, at);
+        assertFalse(at.successful);
+        assertEquals(NostrRequest.SIGNER_NOT_FOUND, at.statusCode);
     }
 }

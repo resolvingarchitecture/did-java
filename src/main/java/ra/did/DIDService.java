@@ -59,6 +59,8 @@ public class DIDService extends BaseService {
     public static final String OPERATION_CLAIM_ROTATION = "CLAIM_ROTATION";
     public static final String OPERATION_ATTEST_ROTATION = "ATTEST_ROTATION";
     public static final String OPERATION_VERIFY_ROTATION = "VERIFY_ROTATION";
+    public static final String OPERATION_LOAD_NOSTR_IDENTITY = "LOAD_NOSTR_IDENTITY";
+    public static final String OPERATION_DELETE_NOSTR_IDENTITY = "DELETE_NOSTR_IDENTITY";
 
     public static final String OPERATION_GET_IDENTITIES = "GET_IDENTITIES";
     public static final String OPERATION_GET_IDENTITY = "GET_IDENTITY";
@@ -141,6 +143,8 @@ public class DIDService extends BaseService {
             case OPERATION_CLAIM_ROTATION: {claimRotation(e);break;}
             case OPERATION_ATTEST_ROTATION: {attestRotation(e);break;}
             case OPERATION_VERIFY_ROTATION: {verifyRotation(e);break;}
+            case OPERATION_LOAD_NOSTR_IDENTITY: {loadNostrIdentity(e);break;}
+            case OPERATION_DELETE_NOSTR_IDENTITY: {deleteNostrIdentity(e);break;}
             case OPERATION_RELOAD: {loadKeyRingImplementations();break;}
             case OPERATION_GET_IDENTITIES: {getIdentities(e);break;}
             case OPERATION_GET_IDENTITY: {getIdentity(e);break;}
@@ -581,8 +585,13 @@ public class DIDService extends BaseService {
             r.publicKeyHex = id.getPublicKeyHex();
             r.npub = id.npub();
             r.did = id.didNostr();
-            r.secretKeyHex = id.secretHex(); // returned once; caller persists (no encrypted store yet)
+            r.secretKeyHex = id.secretHex(); // returned once for the caller to keep its own copy
             r.publicKey = id.toPublicKey();
+            if (r.passphrase != null && !r.passphrase.isEmpty() && nostrKeyRing.hasStore()) {
+                nostrKeyRing.persist(id, r.passphrase);
+                r.persisted = true;
+            }
+            r.passphrase = null;
             r.successful = true;
         } catch (RuntimeException ex) {
             r.statusCode = NostrRequest.INVALID_INPUT;
@@ -685,6 +694,51 @@ public class DIDService extends BaseService {
             r.newKey = v.newKey;
             r.oldKey = v.oldKey;
             r.successful = true;
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT;
+            r.exception = ex;
+        }
+    }
+
+    private void loadNostrIdentity(Envelope e) {
+        LoadNostrIdentityRequest r = (LoadNostrIdentityRequest) e.getData(LoadNostrIdentityRequest.class);
+        if (r == null) { r = new LoadNostrIdentityRequest(); r.statusCode = LoadNostrIdentityRequest.REQUEST_REQUIRED; e.addData(LoadNostrIdentityRequest.class, r); return; }
+        if (r.pubkey == null || r.pubkey.isEmpty()) { r.statusCode = NostrRequest.SIGNER_REQUIRED; return; }
+        if (!nostrKeyRing.hasStore()) { r.statusCode = NostrRequest.INVALID_INPUT; r.errorMessage = "no identity store configured"; return; }
+        String pubkeyHex;
+        try {
+            pubkeyHex = NostrKeys.normalizePubkey(r.pubkey);
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT; r.exception = ex; return;
+        }
+        try {
+            NostrIdentity id = nostrKeyRing.loadIdentity(pubkeyHex, r.passphrase);
+            r.passphrase = null;
+            if (id == null) { r.statusCode = LoadNostrIdentityRequest.NOT_PERSISTED; return; }
+            nostrIdentities.put(id.getPublicKeyHex(), id);
+            r.publicKeyHex = id.getPublicKeyHex();
+            r.npub = id.npub();
+            r.did = id.didNostr();
+            r.publicKey = id.toPublicKey();
+            r.successful = true;
+        } catch (java.security.GeneralSecurityException ex) {
+            r.passphrase = null;
+            r.statusCode = LoadNostrIdentityRequest.BAD_PASSPHRASE;
+            r.errorMessage = ex.getMessage();
+        }
+    }
+
+    private void deleteNostrIdentity(Envelope e) {
+        DeleteNostrIdentityRequest r = (DeleteNostrIdentityRequest) e.getData(DeleteNostrIdentityRequest.class);
+        if (r == null) { r = new DeleteNostrIdentityRequest(); r.statusCode = DeleteNostrIdentityRequest.REQUEST_REQUIRED; e.addData(DeleteNostrIdentityRequest.class, r); return; }
+        if (r.pubkey == null || r.pubkey.isEmpty()) { r.statusCode = NostrRequest.SIGNER_REQUIRED; return; }
+        try {
+            String pubkeyHex = NostrKeys.normalizePubkey(r.pubkey);
+            NostrIdentity removed = nostrIdentities.remove(pubkeyHex);
+            if (removed != null) { removed.clearSensitive(); r.removedFromMemory = true; }
+            if (nostrKeyRing.hasStore()) r.deletedFromDisk = nostrKeyRing.deletePersisted(pubkeyHex);
+            r.successful = r.removedFromMemory || r.deletedFromDisk;
+            if (!r.successful) r.statusCode = NostrRequest.SIGNER_NOT_FOUND;
         } catch (RuntimeException ex) {
             r.statusCode = NostrRequest.INVALID_INPUT;
             r.exception = ex;
@@ -1064,6 +1118,11 @@ public class DIDService extends BaseService {
         nostrKeyRing = new NostrKeyRing();
         if(!nostrKeyRing.init(properties)) {
             LOG.warning("NostrKeyRing (BIP-340) backend failed to load; Nostr identity operations will be unavailable.");
+        }
+        try {
+            nostrKeyRing.setStore(new NostrIdentityStore(new File(getServiceDirectory(), "NOSTR")));
+        } catch (RuntimeException ex) {
+            LOG.warning("Nostr identity store unavailable: " + ex.getMessage());
         }
         // TODO: Support external drives (InfoVault)
         nodesDB = new InfoVaultFileDB();
