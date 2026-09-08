@@ -9,38 +9,33 @@ Uses Key Ring Service to Manage the Physical Persistence, Generation, Encryption
 
 ## Status
 
-The current Java implementation runs as the identity and key-management layer for
-[1M5](https://1m5.io) — node and account identities, key management, signing, and verification for
-an infrastructure-independent communications system. That is where the design gets its requirements
-and its testing.
+The identity layer is **Nostr-compatible secp256k1 / BIP-340** (`ra.did.nostr`): 32-byte
+secret, x-only public key, hex / `npub` / `nsec` / `did:nostr` encodings, canonical
+Nostr-event signing, attestations (`vouch`), guardian-based recovery and rotation, and
+secrets sealed at rest (Argon2id + AES-256-GCM). It passes the shared
+[`did-vectors`](https://github.com/resolvingarchitecture/did-vectors) conformance suite.
+`1m5-core-java`'s `IdentityService` derives the node identity through this module.
 
-## Direction — off OpenPGP
+The legacy **OpenPGP keyring** (`ra.did.openpgp`) is kept as a self-contained
+encrypt / decrypt / sign / verify subsystem for any stray OpenPGP material, but it is **no
+longer an identity path**. There is no OpenPGP → Nostr migration: 1M5 was never marketed or
+deployed, so no OpenPGP identities exist to carry forward.
 
-The working implementation is built on **OpenPGP key rings**: RSA keys, GnuPG-style keyring
-files persisted locally, and PGP key signatures for the web of trust. It works, but the
-OpenPGP ecosystem carries a lot of weight — large keys, awkward key distribution, and a trust
-model that few people ever really operated. In practice that weight is most of what makes
-self-sovereign identity feel impractical to build on.
+The rationale and the spec are one level up:
 
-The replacement is specified one level up, for the whole DID effort rather than this
-implementation alone:
-
-- **[`../STRATEGY.md`](../STRATEGY.md)** — why identity adoption keeps failing and the plan
-  for doing better: ride Nostr rather than bootstrap a network, own the gap it still has (key
-  recovery and attestation), and ship a specification and a small library before a product.
+- **[`../STRATEGY.md`](../STRATEGY.md)** — why identity adoption keeps failing and the plan:
+  ride Nostr rather than bootstrap a network, own the gap it still has (key recovery and
+  attestation), ship a specification and a small library before a product.
 - **[`../DESIGN.md`](../DESIGN.md)** — the technical specification: `secp256k1` / BIP-340
   Schnorr identities, Nostr-compatible signed records, attestations as a decentralized
   replacement for NIP-05, guardian-based recovery and rotation, and a `did:nostr`
-  compatibility view.
+  compatibility view. §7.3 covers this module specifically.
 
-Two reversals from what this README previously said: there will be **no RA-specific DID
-method** (a `did:nostr` community draft already exists — contribute to that instead), and
-**relays are an opt-in distribution option, not the architecture** — signed records are
+RA does **not** register its own DID method (a `did:nostr` community draft already exists),
+and **relays are an opt-in distribution option, not the architecture** — signed records are
 transport-agnostic.
 
-Everything below describes the OpenPGP implementation that exists today. `../DESIGN.md` §7.3
-lists what changes in this module: a `NostrKeyRing` alongside `OpenPGPKeyRing`, a successor to
-the PGP-typed `KeyRing` interface, a real `vouch`, and several defect fixes.
+The sections below still describe the OpenPGP keyring mechanics.
 
 ## Abstract (from W3C)
 Decentralized identifiers (DIDs) are a new type of identifier to provide verifiable, decentralized digital identity.

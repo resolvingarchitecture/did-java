@@ -12,8 +12,8 @@ import java.util.logging.Logger;
  * identity primitive from DID {@code DESIGN.md}.
  *
  * <p>This is the successor to {@link ra.did.openpgp.OpenPGPKeyRing}. It is additive:
- * {@code DIDService} caches key-ring implementations by class name, so this can
- * run alongside the OpenPGP one during migration (§6.4).
+ * {@code DIDService} caches key-ring implementations by class name, so the OpenPGP
+ * keyring (encrypt/decrypt/sign of legacy material) can still run alongside it.
  *
  * <p>Covers keygen, signing and verification, the NIP-19 / {@code did:nostr}
  * encodings, and — once {@link #setStore} is called — encrypted-at-rest

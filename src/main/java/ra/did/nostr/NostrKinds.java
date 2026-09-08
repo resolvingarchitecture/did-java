@@ -24,7 +24,7 @@ public final class NostrKinds {
 
     /** §3.2 verification methods. An unknown method is treated as no stronger than {@code asserted}. */
     public static final List<String> METHODS = unmodifiable(
-            "in-person", "qr", "existing-channel", "openpgp-migration", "guardian", "asserted");
+            "in-person", "qr", "existing-channel", "guardian", "asserted");
 
     /** §3.3 reserved claim attributes ({@code claim} attributes are otherwise open). */
     public static final List<String> CLAIM_ATTRIBUTES = unmodifiable("name", "same-as", "nip05", "not");
