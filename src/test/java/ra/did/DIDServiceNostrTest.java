@@ -270,4 +270,119 @@ public class DIDServiceNostrTest {
         assertFalse(at.successful);
         assertEquals(NostrRequest.SIGNER_NOT_FOUND, at.statusCode);
     }
+
+    @Test
+    @Order(9)
+    public void exportNpubIsStateless() {
+        String pub = newIdentity();
+        ExportNpubRequest r = new ExportNpubRequest();
+        r.pubkey = pub;
+        r = call(DIDService.OPERATION_EXPORT_NPUB, ExportNpubRequest.class, r);
+        assertTrue(r.successful);
+        assertTrue(r.npub.startsWith("npub1"));
+        assertEquals(pub, r.pubkeyHex);
+        assertEquals("did:nostr:" + pub, r.did);
+
+        // works for a key the service has never held
+        ExportNpubRequest r2 = new ExportNpubRequest();
+        r2.pubkey = "100f6d8cbf94afb6fc58e9c384b9b3a6516091373a83c869f4e24a9d2bb4a494";
+        r2 = call(DIDService.OPERATION_EXPORT_NPUB, ExportNpubRequest.class, r2);
+        assertTrue(r2.successful);
+    }
+
+    @Test
+    @Order(10)
+    public void exportNsecRequiresConfirmationAndAHeldKey() {
+        String pub = newIdentity();
+
+        ExportNsecRequest no = new ExportNsecRequest();
+        no.pubkey = pub;
+        no = call(DIDService.OPERATION_EXPORT_NSEC, ExportNsecRequest.class, no);
+        assertFalse(no.successful);
+        assertEquals(ExportNsecRequest.CONFIRMATION_REQUIRED, no.statusCode);
+
+        ExportNsecRequest yes = new ExportNsecRequest();
+        yes.pubkey = pub;
+        yes.confirmed = true;
+        yes = call(DIDService.OPERATION_EXPORT_NSEC, ExportNsecRequest.class, yes);
+        assertTrue(yes.successful);
+        assertTrue(yes.nsec.startsWith("nsec1"));
+
+        ExportNsecRequest unknown = new ExportNsecRequest();
+        unknown.pubkey = "0000000000000000000000000000000000000000000000000000000000000000";
+        unknown.confirmed = true;
+        unknown = call(DIDService.OPERATION_EXPORT_NSEC, ExportNsecRequest.class, unknown);
+        assertFalse(unknown.successful);
+        assertEquals(NostrRequest.SIGNER_NOT_FOUND, unknown.statusCode);
+    }
+
+    @Test
+    @Order(11)
+    public void resolveDidDocument() {
+        String pub = newIdentity();
+        ResolveDidDocumentRequest r = new ResolveDidDocumentRequest();
+        r.pubkey = "did:nostr:" + pub;
+        r.relays.add("wss://relay.example.com");
+        r = call(DIDService.OPERATION_RESOLVE_DID_DOCUMENT, ResolveDidDocumentRequest.class, r);
+        assertTrue(r.successful);
+        assertEquals("did:nostr:" + pub, r.document.get("id"));
+        assertEquals("DIDNostr", r.document.get("type"));
+        java.util.List<?> vm = (java.util.List<?>) r.document.get("verificationMethod");
+        java.util.Map<?, ?> vm0 = (java.util.Map<?, ?>) vm.get(0);
+        assertEquals("fe70102" + pub, vm0.get("publicKeyMultibase"));
+        assertNotNull(r.document.get("service"));
+        assertNotNull(r.documentJson);
+    }
+
+    @Test
+    @Order(12)
+    public void getAttestationsAggregates() {
+        String subject = newIdentity();
+        String a1 = newIdentity();
+        String a2 = newIdentity();
+        String a3 = newIdentity();
+
+        java.util.List<NostrEvent> events = new ArrayList<>();
+        events.add(attestation(a1, subject, "name", "alice", "in-person"));
+        events.add(attestation(a2, subject, "name", "alice", "qr"));
+        events.add(attestation(a3, subject, "not", "alice", "existing-channel"));
+
+        GetAttestationsRequest r = new GetAttestationsRequest();
+        r.subjectPubkey = subject;
+        r.attestations = events;
+        r = call(DIDService.OPERATION_GET_ATTESTATIONS, GetAttestationsRequest.class, r);
+
+        assertTrue(r.successful, r.errorMessage);
+        assertEquals(3, r.total);
+        assertEquals(3, r.attesters.size());
+        assertEquals(Integer.valueOf(1), r.byMethod.get("in-person"));
+        assertEquals(Integer.valueOf(1), r.byMethod.get("qr"));
+        assertTrue(r.names.contains("alice"));
+        assertTrue(r.hasNegative);
+        assertEquals(1, r.negativeFrom.size());
+        assertTrue(r.negativeFrom.contains(a3));
+    }
+
+    private static NostrEvent attestation(String attesterPub, String subjectPub,
+                                          String attr, String val, String method) {
+        AttestRequest at = new AttestRequest();
+        at.signerPubkey = attesterPub;
+        at.subjectPubkey = subjectPub;
+        at.claims.put(attr, val);
+        at.method = method;
+        at = call(DIDService.OPERATION_ATTEST, AttestRequest.class, at);
+        return at.event;
+    }
+
+    @Test
+    @Order(13)
+    public void verifyIdentityReportsWhetherKnown() {
+        Envelope e = Envelope.documentFactory();
+        e.addNVP("username", "no-such-identity");
+        e.addNVP("identityType", "IDENTITY");
+        e.addRoute(DIDService.class.getName(), DIDService.OPERATION_VERIFY_IDENTITY);
+        e.setRoute(e.getDynamicRoutingSlip().nextRoute());
+        service.handleDocument(e);
+        assertEquals(Boolean.FALSE, e.getValue("verified"));
+    }
 }

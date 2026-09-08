@@ -102,14 +102,15 @@ public final class NostrKeys {
 
     // --- normalise ------------------------------------------------
 
-    /** hex or {@code npub1…} → canonical lowercase hex. Accepts what §1.1 says to accept. */
+    /** hex, {@code npub1…} or {@code did:nostr:…} → canonical lowercase hex. Accepts what §1.1 says to accept. */
     public static String normalizePubkey(String input) {
         if (input == null) throw new IllegalArgumentException("pubkey required");
         String s = input.trim();
         if (s.startsWith("npub1")) return npubToHex(s);
+        if (s.startsWith("did:nostr:")) return didToHex(s);
         String lower = s.toLowerCase(Locale.ROOT);
         if (!HEX64.matcher(lower).matches()) {
-            throw new IllegalArgumentException("expected 64 hex chars or an npub");
+            throw new IllegalArgumentException("expected 64 hex chars, an npub, or did:nostr:<hex>");
         }
         return lower;
     }

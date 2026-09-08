@@ -61,12 +61,19 @@ public class DIDService extends BaseService {
     public static final String OPERATION_VERIFY_ROTATION = "VERIFY_ROTATION";
     public static final String OPERATION_LOAD_NOSTR_IDENTITY = "LOAD_NOSTR_IDENTITY";
     public static final String OPERATION_DELETE_NOSTR_IDENTITY = "DELETE_NOSTR_IDENTITY";
+    public static final String OPERATION_EXPORT_NPUB = "EXPORT_NPUB";
+    public static final String OPERATION_EXPORT_NSEC = "EXPORT_NSEC";
+    public static final String OPERATION_RESOLVE_DID_DOCUMENT = "RESOLVE_DID_DOCUMENT";
+    public static final String OPERATION_GET_ATTESTATIONS = "GET_ATTESTATIONS";
 
     public static final String OPERATION_GET_IDENTITIES = "GET_IDENTITIES";
     public static final String OPERATION_GET_IDENTITY = "GET_IDENTITY";
     public static final String OPERATION_VERIFY_IDENTITY = "VERIFY";
     public static final String OPERATION_SAVE_IDENTITY = "SAVE";
     public static final String OPERATION_DELETE_IDENTITY = "DELETE";
+    public static final String OPERATION_GET_NODE_DID = "GET_NODE_DID";
+    public static final String OPERATION_REVOKE_IDENTITY = "REVOKE_IDENTITY";
+    public static final String OPERATION_GET_PUBLIC_KEY = "GET_PUBLIC_KEY";
 
     public static final String OPERATION_AUTHENTICATE = "AUTHENTICATE";
 
@@ -145,10 +152,17 @@ public class DIDService extends BaseService {
             case OPERATION_VERIFY_ROTATION: {verifyRotation(e);break;}
             case OPERATION_LOAD_NOSTR_IDENTITY: {loadNostrIdentity(e);break;}
             case OPERATION_DELETE_NOSTR_IDENTITY: {deleteNostrIdentity(e);break;}
+            case OPERATION_EXPORT_NPUB: {exportNpub(e);break;}
+            case OPERATION_EXPORT_NSEC: {exportNsec(e);break;}
+            case OPERATION_RESOLVE_DID_DOCUMENT: {resolveDidDocument(e);break;}
+            case OPERATION_GET_ATTESTATIONS: {getAttestations(e);break;}
             case OPERATION_RELOAD: {loadKeyRingImplementations();break;}
             case OPERATION_GET_IDENTITIES: {getIdentities(e);break;}
             case OPERATION_GET_IDENTITY: {getIdentity(e);break;}
+            case OPERATION_GET_NODE_DID: {getNodeDID(e);break;}
             case OPERATION_VERIFY_IDENTITY: {verifyIdentity(e);break;}
+            case OPERATION_REVOKE_IDENTITY: {revokeIdentity(e);break;}
+            case OPERATION_GET_PUBLIC_KEY: {getPublicKey(e);break;}
             case OPERATION_AUTHENTICATE: {authenticate(e);break;}
             case OPERATION_SAVE_IDENTITY: {saveIdentity(e);break;}
             case OPERATION_DELETE_IDENTITY: {deleteIdentity(e);break;}
@@ -745,6 +759,157 @@ public class DIDService extends BaseService {
         }
     }
 
+    private void exportNpub(Envelope e) {
+        ExportNpubRequest r = (ExportNpubRequest) e.getData(ExportNpubRequest.class);
+        if (r == null) { r = new ExportNpubRequest(); r.statusCode = ExportNpubRequest.REQUEST_REQUIRED; e.addData(ExportNpubRequest.class, r); return; }
+        if (r.pubkey == null || r.pubkey.isEmpty()) { r.statusCode = NostrRequest.SIGNER_REQUIRED; return; }
+        try {
+            String hex = NostrKeys.normalizePubkey(r.pubkey);
+            r.pubkeyHex = hex;
+            r.npub = NostrKeys.hexToNpub(hex);
+            r.did = NostrKeys.hexToDid(hex);
+            r.successful = true;
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT;
+            r.exception = ex;
+        }
+    }
+
+    private void exportNsec(Envelope e) {
+        ExportNsecRequest r = (ExportNsecRequest) e.getData(ExportNsecRequest.class);
+        if (r == null) { r = new ExportNsecRequest(); r.statusCode = ExportNsecRequest.REQUEST_REQUIRED; e.addData(ExportNsecRequest.class, r); return; }
+        if (r.pubkey == null || r.pubkey.isEmpty()) { r.statusCode = NostrRequest.SIGNER_REQUIRED; return; }
+        if (!r.confirmed) { r.statusCode = ExportNsecRequest.CONFIRMATION_REQUIRED; r.passphrase = null; return; }
+        String pubkeyHex;
+        try {
+            pubkeyHex = NostrKeys.normalizePubkey(r.pubkey);
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT; r.exception = ex; r.passphrase = null; return;
+        }
+        NostrIdentity id = nostrIdentities.get(pubkeyHex);
+        try {
+            if ((id == null || !id.hasSecret()) && nostrKeyRing.hasStore() && r.passphrase != null) {
+                id = nostrKeyRing.loadIdentity(pubkeyHex, r.passphrase);
+            }
+        } catch (java.security.GeneralSecurityException gse) {
+            r.statusCode = LoadNostrIdentityRequest.BAD_PASSPHRASE; r.errorMessage = gse.getMessage(); r.passphrase = null; return;
+        } finally {
+            r.passphrase = null;
+        }
+        if (id == null || !id.hasSecret()) { r.statusCode = NostrRequest.SIGNER_NOT_FOUND; return; }
+        r.nsec = NostrKeys.secretToNsec(id.secretHex());
+        r.successful = true;
+        LOG.warning("nsec exported for identity " + pubkeyHex.substring(0, 16) + "... (caller asserted user confirmation)");
+    }
+
+    private void resolveDidDocument(Envelope e) {
+        ResolveDidDocumentRequest r = (ResolveDidDocumentRequest) e.getData(ResolveDidDocumentRequest.class);
+        if (r == null) { r = new ResolveDidDocumentRequest(); r.statusCode = ResolveDidDocumentRequest.REQUEST_REQUIRED; e.addData(ResolveDidDocumentRequest.class, r); return; }
+        if (r.pubkey == null || r.pubkey.isEmpty()) { r.statusCode = NostrRequest.SIGNER_REQUIRED; return; }
+        try {
+            r.document = NostrDidDocument.forPubkey(r.pubkey, r.relays);
+            r.documentJson = JSONPretty.toPretty(JSONParser.toString(r.document), 2);
+            r.successful = true;
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT;
+            r.exception = ex;
+        }
+    }
+
+    private void getAttestations(Envelope e) {
+        GetAttestationsRequest r = (GetAttestationsRequest) e.getData(GetAttestationsRequest.class);
+        if (r == null) { r = new GetAttestationsRequest(); r.statusCode = GetAttestationsRequest.REQUEST_REQUIRED; e.addData(GetAttestationsRequest.class, r); return; }
+        if (r.subjectPubkey == null || r.subjectPubkey.isEmpty()) { r.statusCode = NostrRequest.SUBJECT_REQUIRED; return; }
+        String subject;
+        try {
+            subject = NostrKeys.normalizePubkey(r.subjectPubkey);
+        } catch (RuntimeException ex) {
+            r.statusCode = NostrRequest.INVALID_INPUT; r.exception = ex; return;
+        }
+        Set<String> attesters = new LinkedHashSet<>();
+        Set<String> names = new LinkedHashSet<>();
+        Set<String> negativeFrom = new LinkedHashSet<>();
+        for (NostrEvent ev : r.attestations) {
+            NostrEvent.VerifyResult vr = ev.verify();
+            if (!vr.ok) {
+                r.statusCode = NostrRequest.INVALID_INPUT;
+                r.errorMessage = "event " + ev.getId() + " failed verification step " + vr.step + ": " + vr.reason;
+                return;
+            }
+            if (ev.getKind() != NostrKinds.IDENTITY_ATTESTATION || !subject.equals(ev.firstTag("d"))) continue;
+            NostrAttestations.Parsed p = NostrAttestations.parse(ev);
+            if (p.isRevocation()) { r.revocations++; continue; }
+            r.total++;
+            attesters.add(p.attester);
+            String method = p.method == null ? "asserted" : p.method;
+            r.byMethod.merge(method, 1, Integer::sum);
+            for (NostrAttestations.Claim c : p.claims) {
+                if ("name".equals(c.attribute)) names.add(c.value);
+                if ("not".equals(c.attribute)) { r.hasNegative = true; negativeFrom.add(p.attester); }
+            }
+        }
+        r.attesters = new ArrayList<>(attesters);
+        r.names = new ArrayList<>(names);
+        r.negativeFrom = new ArrayList<>(negativeFrom);
+        r.successful = true;
+    }
+
+    // --- legacy DID handlers (previously missing a case) ------
+
+    private void getNodeDID(Envelope e) {
+        GetNodeDIDRequest r = (GetNodeDIDRequest) e.getData(GetNodeDIDRequest.class);
+        if (r == null) { r = new GetNodeDIDRequest(); r.statusCode = GetNodeDIDRequest.REQUEST_REQUIRED; e.addData(GetNodeDIDRequest.class, r); return; }
+        String username = nonNull(r.did) ? r.did.getUsername() : null;
+        if (nonNull(username) && !username.isEmpty() && !"Anon".equals(username)) {
+            DID loaded = load(username, DID.DIDType.NODE, false);
+            if (isNull(loaded)) { r.statusCode = GetNodeDIDRequest.DID_REQUIRED; return; }
+            r.did = loaded;
+            e.addData(DID.class, loaded);
+            return;
+        }
+        List<DID> nodes = loadAll(DID.DIDType.NODE);
+        if (nodes.isEmpty()) { r.statusCode = GetNodeDIDRequest.DID_REQUIRED; return; }
+        r.did = nodes.get(0);
+        e.addData(DID.class, nodes.get(0));
+        e.addNVP("nodeCount", nodes.size());
+    }
+
+    private void revokeIdentity(Envelope e) {
+        RevokeIdentityRequest r = (RevokeIdentityRequest) e.getData(RevokeIdentityRequest.class);
+        if (r == null) { r = new RevokeIdentityRequest(); r.statusCode = RevokeIdentityRequest.REQUEST_REQUIRED; e.addData(RevokeIdentityRequest.class, r); return; }
+        if (isNull(r.username) || r.username.isEmpty()) { r.statusCode = RevokeIdentityRequest.DID_REQUIRED; return; }
+        DID did = load(r.username, DID.DIDType.IDENTITY, false);
+        if (isNull(did)) { r.statusCode = RevokeIdentityRequest.DID_REQUIRED; e.addNVP("revoked", false); return; }
+        // Revocation of a locally-held OpenPGP identity = mark it inactive and
+        // remove its record. Nostr identities revoke by publishing a signed
+        // attestation/rotation event, not through this operation.
+        boolean removed = identitiesDB.delete(r.username + ".json");
+        e.addNVP("revoked", removed);
+        e.addNVP("previousFingerprint", nonNull(did.getPublicKey()) ? did.getPublicKey().getFingerprint() : null);
+    }
+
+    private void getPublicKey(Envelope e) {
+        GetPublicKeyRequest r = (GetPublicKeyRequest) e.getData(GetPublicKeyRequest.class);
+        if (r == null) { r = new GetPublicKeyRequest(); r.statusCode = GetPublicKeyRequest.REQUEST_REQUIRED; e.addData(GetPublicKeyRequest.class, r); return; }
+        if (isNull(r.alias) && isNull(r.fingerprint)) { r.statusCode = GetPublicKeyRequest.ALIAS_OR_FINGERPRINT_REQUIRED; return; }
+        if (isNull(r.keyRingImplementation)) r.keyRingImplementation = OpenPGPKeyRing.class.getName();
+        KeyRing keyRing = keyRings.get(r.keyRingImplementation);
+        if (isNull(keyRing)) { r.statusCode = GetPublicKeyRequest.KEY_RING_IMPLEMENTATION_UNKNOWN; return; }
+        if (isNull(r.location) || isNull(r.keyRingUsername)) {
+            r.statusCode = GetPublicKeyRequest.LOCATION_OR_USERNAME_REQUIRED;
+            return;
+        }
+        try {
+            org.bouncycastle.openpgp.PGPPublicKeyRingCollection c =
+                    keyRing.getPublicKeyRingCollection(r.location, r.keyRingUsername);
+            r.publicKey = keyRing.getPublicKey(c, r.alias, r.master);
+            r.successful = true;
+        } catch (Exception ex) {
+            r.exception = ex;
+            LOG.warning(ex.getLocalizedMessage());
+        }
+    }
+
     private void getIdentities(Envelope e) {
         LOG.info("Received get Identities request.");
         int start = 0;
@@ -770,7 +935,9 @@ public class DIDService extends BaseService {
         DID.DIDType type = DID.DIDType.valueOf((String)e.getValue("identityType"));
         Boolean external = (Boolean)e.getValue("external");
         DID did = load(username, type, external);
-        e.addNVP("verified", isNull(did));
+        e.addNVP("verified", nonNull(did)); // an identity is verified when it is known
+        if(nonNull(did))
+            e.addData(DID.class, did);
     }
 
     private void authenticate(Envelope e) {
@@ -1083,24 +1250,36 @@ public class DIDService extends BaseService {
         return loadedDIDs;
     }
 
+    /** Property naming the comma-separated {@link KeyRing} implementation classes to load. */
+    public static final String PROP_KEY_RINGS = "ra.did.KeyRings";
+
     private void loadKeyRingImplementations(){
         keyRings.clear();
-        KeyRing keyRing;
-        if(properties.getProperty("ra.keyring.KeyRings") == null) {
-            keyRing = new OpenPGPKeyRing(); // Default
+        String configured = properties.getProperty(PROP_KEY_RINGS);
+        if(configured == null || configured.trim().isEmpty()) {
+            KeyRing keyRing = new OpenPGPKeyRing(); // Default
             if(keyRing.init(properties))
                 keyRings.put(OpenPGPKeyRing.class.getName(), keyRing);
-        } else {
-            String[] keyRingStrings = properties.getProperty("ra.keyring.KeyRings").split(",");
-            for (String keyRingString : keyRingStrings) {
-                try {
-                    keyRing = (KeyRing) Class.forName(keyRingString).getConstructor().newInstance();
-                    if(keyRing.init(properties))
-                        keyRings.put(keyRingString, keyRing);
-                } catch (Exception e) {
-                    LOG.warning(e.getLocalizedMessage());
-                }
+            return;
+        }
+        for (String keyRingClass : configured.split(",")) {
+            keyRingClass = keyRingClass.trim();
+            if (keyRingClass.isEmpty()) continue;
+            try {
+                KeyRing keyRing = (KeyRing) Class.forName(keyRingClass).getConstructor().newInstance();
+                if(keyRing.init(properties))
+                    keyRings.put(keyRingClass, keyRing);
+            } catch (Throwable t) {
+                // A missing optional implementation (e.g. YubiKeyRing when usb4java
+                // was excluded downstream) must not stop the service from starting.
+                LOG.warning("KeyRing implementation " + keyRingClass + " not loaded: " + t);
             }
+        }
+        if (keyRings.isEmpty()) {
+            LOG.warning("no configured KeyRing implementations loaded; falling back to OpenPGPKeyRing");
+            KeyRing keyRing = new OpenPGPKeyRing();
+            if(keyRing.init(properties))
+                keyRings.put(OpenPGPKeyRing.class.getName(), keyRing);
         }
     }
 
@@ -1109,7 +1288,15 @@ public class DIDService extends BaseService {
         super.start(properties);
         LOG.info("Starting....");
         updateStatus(ServiceStatus.STARTING);
-        this.properties = properties;
+        // Merge ra-did.config (KeyRing implementations etc.) without overriding
+        // anything the caller supplied; BaseService only loads ra-common.config.
+        try {
+            this.properties = ra.common.Config.loadFromClasspath("ra-did.config", properties, false);
+        } catch (Exception ex) {
+            LOG.warning("could not load ra-did.config: " + ex.getMessage());
+            this.properties = properties;
+        }
+        if (this.properties == null) this.properties = properties;
         // Android apps set SpongyCastle as the default provider
         if(!SystemVersion.isAndroid()) {
             Security.addProvider(new BouncyCastleProvider());
