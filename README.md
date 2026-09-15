@@ -11,15 +11,16 @@ Uses Key Ring Service to Manage the Physical Persistence, Generation, Encryption
 
 The identity layer is **Nostr-compatible secp256k1 / BIP-340** (`ra.did.nostr`): 32-byte
 secret, x-only public key, hex / `npub` / `nsec` / `did:nostr` encodings, canonical
-Nostr-event signing, attestations (`vouch`), guardian-based recovery and rotation, and
-secrets sealed at rest (Argon2id + AES-256-GCM). It passes the shared
-[`did-vectors`](https://github.com/resolvingarchitecture/did-vectors) conformance suite.
-`1m5-core-java`'s `IdentityService` derives the node identity through this module.
+Nostr-event signing, attestations (`vouch`), guardian-based recovery and rotation,
+**NIP-44 v2 encrypted payloads** (`Nip44`: ECDH → HKDF-SHA256 → per-message ChaCha20 +
+HMAC-SHA256, verified against the spec's own official test vectors — see
+`Nip44VectorsTest`), and secrets sealed at rest (Argon2id + AES-256-GCM). It passes the
+shared [`did-vectors`](https://github.com/resolvingarchitecture/did-vectors) conformance
+suite. `1m5-core-java`'s `IdentityService` derives the node identity through this module.
 
 The legacy **OpenPGP keyring** (`ra.did.openpgp`) is kept as a self-contained
 encrypt / decrypt / sign / verify subsystem for any stray OpenPGP material, but it is **no
-longer an identity path**. There is no OpenPGP → Nostr migration: 1M5 was never marketed or
-deployed, so no OpenPGP identities exist to carry forward.
+longer an identity path**.
 
 The rationale and the spec are one level up:
 
@@ -56,7 +57,7 @@ A unified identity requires that people not only have an online presence, but th
 across both online and real-world environments. One unified identity for all spheres of life.
 
 One unified identity can come about through individual projects by supporting common standards.
-1M5 will only use standard algorithms well supported globally and any standard interfaces that become widely adopted
+RA DID will only use standard algorithms well supported globally and any standard interfaces that become widely adopted
 so long as those interfaces come from open source and free efforts.
 
 * AES symmetric keys for encrypting identity keys and as session keys
@@ -85,9 +86,6 @@ The platform, protocols on which self-sovereign identities are built, must be go
 By definition, if the platform is governed by a private entity or limited set of participants, the Identity holder
 is not in control of the future of their identity.
 
-1M5 will be governed by members and membership will be open to those using it through their public keys (identities).
-Governance within the application will be supported in the future by members, especially with the implementation of [V4D](http://v4d.gaiagloaming.io).
-
 ### Identities must exist for the life of the identity holder
 
 While the platform and protocols evolve, each singular identity must remain intact. This must not contradict a
@@ -95,9 +93,7 @@ While the platform and protocols evolve, each singular identity must remain inta
 be modified or removed as appropriate over time. To do this requires a firm separation between an identity and
 its claims: they can't be tied forever.
 
-* 1M5 is a decentralized autonomous organization in that it is not registered in any jurisdiction and thus will exist so long as there is membership.
 * All keys and the data they have access to can be deleted from the system at any time.
-* Data provided to another party is a one-time copy provided to the other party and no longer revocable unless maintained with the other party in 1M5.
 * Any recurring data access to another party can be immediately canceled at any time.
 
 ### Identities must be portable
@@ -135,20 +131,12 @@ and shared. If an identity holder wants to enable an age-related commercial tran
 the only verified claim that needs to be share is whether they are over 21. There is not need to share actual age,
 street address, height, weight, etc.
 
-* Access can be given to data at the lowest attribute level explicitly approved by the member.
-* Data can be shown to 3rd parties if the member wishes as in the example with being old enough to purchase alcohol in a jurisdiction requiring proof of age but all data owned by the user is managed by the user to uphold voluntaryism.
-* The only rules to be followed within 1M5 is ethics and it's defined to be the non-aggression principle / voluntary relationships (voluntaryism).
-
 ### The rights of identity holders must supersede any other platform or ecosystem entities
 
 If a conflict arises between the needs of the platform or entities engaging with identity holders, the
 governance must be designed to err on the side of preserving these rights for identity holder over the
 needs of the protocols, platform or network. To ensure this, identity authentication must be decentralized,
 independent, and free of censorship.
-
-* Decentralized: 1M5 only uses P2P open source free software systems
-* Independent: 1M5 is a DAO with no jurisdiction oversight, only member oversight
-* Free of Censorship: anonymous highly censorship resistant communications with strong at-rest data encryption
 
 ## Design Goals
 We share design goals from the [W3C spec](https://w3c-ccg.github.io/did-spec/#design-goals):
