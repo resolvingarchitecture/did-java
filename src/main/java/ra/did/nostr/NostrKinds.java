@@ -13,6 +13,11 @@ import java.util.regex.Pattern;
  */
 public final class NostrKinds {
 
+    /** Standard NIP-01 kinds Remnant's Nostr surface uses (`1m5-android/DESIGN.md` §"Rollout Order" row 5). Not RA-specific, no kind-specific validation. */
+    public static final int PROFILE = 0;
+    public static final int NOTE = 1;
+    public static final int FOLLOWS = 3;
+
     public static final int IDENTITY_ATTESTATION = 30100;
     public static final int GUARDIAN_SET = 30101;
     public static final int ROTATION_ATTESTATION = 30102;
