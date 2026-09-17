@@ -95,19 +95,31 @@
             <version>1.3.0</version>
         </dependency>
 
+        <!-- Nostr relay connections (ra.did.nostr.relay) -->
+        <!-- Pure Java, Android-safe (no bundled-class collision the way
+             org.json has on Android - see bitcoin-client-java's own note on
+             that exact hazard) - needed at runtime now, not just for tests,
+             so it moved out of test scope. Reused as the relay message codec
+             too: NIP-01 envelopes carry arbitrary user content that ra.common's
+             JSONParser does not escape/unescape correctly (see below). -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.10.1</version>
+        </dependency>
+        <!-- Minimal, Android-safe WebSocket client/server - client for
+             NostrRelayClient, server only as a fake relay in tests. -->
+        <dependency>
+            <groupId>org.java-websocket</groupId>
+            <artifactId>Java-WebSocket</artifactId>
+            <version>1.5.7</version>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
             <version>5.8.2</version>
-            <scope>test</scope>
-        </dependency>
-        <!-- A conformant JSON parser for reading the did-vectors fixtures
-             (ra-common's JSONParser does not decode \n / \uXXXX escapes). -->
-        <dependency>
-            <groupId>com.google.code.gson</groupId>
-            <artifactId>gson</artifactId>
-            <version>2.10.1</version>
             <scope>test</scope>
         </dependency>
 
