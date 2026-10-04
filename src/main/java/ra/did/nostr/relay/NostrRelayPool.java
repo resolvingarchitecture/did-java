@@ -29,7 +29,7 @@ public final class NostrRelayPool {
 
     /** The relay set {@code did/scripts/publish-drafts.cjs} already publishes to, plus 1M5's own node - always included, not just a fallback. */
     public static final List<String> DEFAULT_RELAYS = Collections.unmodifiableList(Arrays.asList(
-            "wss://resolvingarchitecture.io/apps/nostr/node",
+            "wss://resolvingarchitecture.dev/apps/nostr/node",
             "wss://relay.damus.io",
             "wss://nos.lol",
             "wss://relay.primal.net",
