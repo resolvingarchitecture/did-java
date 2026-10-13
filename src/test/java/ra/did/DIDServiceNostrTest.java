@@ -191,6 +191,20 @@ public class DIDServiceNostrTest {
     }
 
     @Test
+    @Order(6)
+    public void importedNsecDerivesNpub() {
+        GenerateNostrIdentityRequest a = call(DIDService.OPERATION_GENERATE_NOSTR_IDENTITY,
+                GenerateNostrIdentityRequest.class, new GenerateNostrIdentityRequest());
+
+        GenerateNostrIdentityRequest b = new GenerateNostrIdentityRequest();
+        b.importSecretKeyHex = ra.did.nostr.NostrKeys.secretToNsec(a.secretKeyHex);
+        b = call(DIDService.OPERATION_GENERATE_NOSTR_IDENTITY, GenerateNostrIdentityRequest.class, b);
+        assertTrue(b.successful);
+        assertEquals(a.publicKeyHex, b.publicKeyHex);
+        assertEquals(a.npub, b.npub);
+    }
+
+    @Test
     @Order(7)
     public void generateWithPassphrasePersistsAndReloadsInAFreshService() {
         GenerateNostrIdentityRequest g = new GenerateNostrIdentityRequest();

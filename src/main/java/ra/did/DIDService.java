@@ -593,7 +593,7 @@ public class DIDService extends BaseService {
         if (r == null) { r = new GenerateNostrIdentityRequest(); r.statusCode = GenerateNostrIdentityRequest.REQUEST_REQUIRED; e.addData(GenerateNostrIdentityRequest.class, r); return; }
         try {
             NostrIdentity id = (r.importSecretKeyHex != null && !r.importSecretKeyHex.isEmpty())
-                    ? NostrIdentity.fromSecretHex(r.importSecretKeyHex)
+                    ? NostrIdentity.fromSecretHex(NostrKeys.normalizeSecret(r.importSecretKeyHex))
                     : nostrKeyRing.generateIdentity();
             nostrIdentities.put(id.getPublicKeyHex(), id);
             r.publicKeyHex = id.getPublicKeyHex();

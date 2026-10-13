@@ -13,7 +13,7 @@ import ra.common.identity.PublicKey;
  */
 public class GenerateNostrIdentityRequest extends NostrRequest {
 
-    /** Optional: import this 32-byte secret (hex) instead of generating one. Not serialised. */
+    /** Optional: import this 32-byte secret (64-char hex or {@code nsec1…}) instead of generating one. Not serialised. */
     public String importSecretKeyHex;
 
     /**

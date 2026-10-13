@@ -89,6 +89,13 @@ public final class NostrKeys {
 
     // --- did:nostr (§5.1) -----------------------------------------
 
+    /** {@code nsec1…} or 64-char hex → canonical lowercase secret hex. The npub follows from it via {@link NostrIdentity}. */
+    public static String normalizeSecret(String input) {
+        String s = input.trim();
+        if (s.toLowerCase().startsWith("nsec1")) return nsecToSecret(s.toLowerCase());
+        return s.toLowerCase();
+    }
+
     public static String hexToDid(String pubkeyHex) {
         requireHex64(pubkeyHex, "pubkey");
         return "did:nostr:" + pubkeyHex;
